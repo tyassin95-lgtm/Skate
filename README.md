@@ -5,24 +5,30 @@ A small third-person skateboarding prototype for Android, built in **Godot 4.3**
 The goal here is feel, not scope: the skating physics, the controls, the animation blending and
 the camera are the product. The park is deliberately small and the art is deliberately plain.
 
-![The skater rolling through the park](docs/shot_roll.png)
+![The riding stance: feet solved onto the deck over both trucks](docs/shot_stance.png)
 
 ## Playing it
 
 | | Touch (Android) | Keyboard (desktop) |
 |---|---|---|
-| Steer | Drag anywhere on the **left half** — the stick appears under your thumb | `A` / `D` |
-| Brake / powerslide | Drag the left stick **down** | `S` |
-| Push | **PUSH** button, tap repeatedly | `W` |
-| Ollie | Hold anywhere on the **right half** to load, release to pop | Hold/release `Space` |
+| Ride / steer | **Left half** — a full analog stick appears wherever your thumb lands. Push it where you want to skate | `W` `A` `S` `D` |
+| Brake | Pull the stick back against the way you are going | `S` |
+| Ollie | **Right half** — hold to load, release to pop | Hold/release `Space` |
 | Kickflip | Load the pop pad, **flick left** as you release | `J` |
 | 360 shuvit | Load the pop pad, **flick right** as you release | `K` |
 | Grind | Ollie onto a rail, ledge or coping roughly in line with it | — |
 | Reset | **RESET** button | `R` |
 
-Steering is speed-dependent: you get a slow kick-turn when stopped, the sharpest carve at
-walking-to-jogging pace, and progressively less bite the faster you go. Carving hard scrubs speed,
-so the fastest line through the park is the smoothest one.
+The stick names a direction *on screen*, not a rudder position. Push it where you want to go and
+the skater carves that way; because it is resolved in camera space it keeps meaning the same thing
+however the view has swung round. Pushing forward drives the pushes, holding it back past side-on
+is the brake, and at a standstill it becomes a kick-turn so you can point yourself anywhere before
+setting off. There is no separate push button — one thumb rides, the other pops.
+
+Steering has weight: the trucks take up a steering input over about a quarter of a second rather
+than snapping to it, and they let go faster than they load, so the board leans into a carve and
+straightens promptly. Authority tails off with speed and carving hard scrubs speed, so the fastest
+line through the park is the smoothest one.
 
 The ollie is charged: a tap gives you a small hop, a full hold gives you enough air to land a
 kickflip. Land before the board has come back round and you eat it.
@@ -113,19 +119,55 @@ snap to the curve and are driven along it directly rather than by `move_and_slid
 keeps a 50-50 from chattering off the bar. Gravity still pulls you along a sloped rail. Popping off
 carries your speed along the tangent.
 
+### Character/board alignment — the thing that was most wrong
+
+The rig faces **+Z** while Godot's forward is **−Z** — a Blender export artifact. The first build
+compensated with an eyeballed yaw on the character node, which lined the board up but meant every
+forward-moving animation clip played *across* the deck. That is what "pushing forward makes the
+character move sideways" actually was: not an animation choice, a coordinate-system bug.
+
+The fix is that the character's root points along the board's nose (a flat 180°, verified by a test
+that compares the two basis vectors), and the sideways skate stance comes from twisting the
+**pelvis** inside the skeleton — hips open across the deck, shoulders following about 80% of the
+way, head turning back down the line. That is the real anatomy, and it leaves the root aligned with
+travel so nothing downstream has to compensate.
+
 ### Animation — `scripts/skater/SkaterAnimator.gd`, `SkateLeanModifier.gd`
 
-The Quaternius library has no skateboarding clips, so the approach is two-layer: a state machine
-picks the closest generic clip as a base pose, and a `SkeletonModifier3D` layers the skating on top
-— stance width along the deck, crouch depth driven by speed and the ollie charge, carve lean that
-tracks the steering input, shoulder counter-rotation and balance arms. It multiplies into the
-animated pose rather than replacing it, so the underlying clip still breathes through.
+Reviewing the library honestly: it contains no skateboarding clips, and its locomotion clips
+(`Walk`, `Jog_Fwd`, `Sprint`, `Crouch_Fwd`, `Push`) are worse than nothing here, because each one
+steps the body through space. `Crouch_Idle` reads well by name but is a folded-over sneak. So the
+clips supply only two base states — `Idle` while on the board, and `Roll` for a bail, where a canned
+full-body animation is genuinely the right answer — and everything that reads as skating is built
+procedurally in a `SkeletonModifier3D` from the board's real state: stance twist, crouch depth
+following speed and the ollie charge, carve lean tracking the trucks, landing compression, balance
+arms, and the push stroke. Transitions cannot snap, because the procedural layer is continuous by
+construction and the only cross-fade left is on and off a bail.
 
-There is no leg IK, so bending the knees would lift the feet off the deck; the animator sinks the
-whole character by however far the feet rose, which keeps them planted at any crouch depth and for
-any clip.
+**The feet are solved, not posed.** Each leg is placed by closed-form two-bone IK against a target
+on the deck, expressed in the *board's* frame, so the soles sit over the trucks at any crouch depth,
+on any slope, through any lean, and as the trucks compress. Targets are clamped to the leg's actual
+reach first, so the solver is always given something it can hit exactly. A push is then just that
+target leaving the deck, reaching down beside the board, sweeping back along the ground and stepping
+back on — which is what a push is, rather than a jog clip played sideways.
 
-### Park — `scripts/park/ParkBuilder.gd`
+Three bugs in this area only became findable once the invariant was asserted directly:
+
+- Godot **restores bone poses after the modifier pass**, so reading `get_bone_global_pose()` from
+  outside it returns the pre-modifier values. The first version of the test measured those and
+  reported a working solver as 300 mm out. The solved positions are now captured inside the pass.
+- The AnimationTree processed *after* the skeleton's modifier pass and wrote the raw clip pose
+  straight over the skate pose, which looks like a modifier that half-works rather than an ordering
+  bug.
+- `SkaterAnimator._ready()` runs before its parent's `@onready` vars exist, so the board reference
+  was null and the feet were placed against the skeleton origin instead of the deck — a constant
+  12 cm float while every individual pose value still looked reasonable.
+
+`SkateLeanModifier.sole_clearance()` exists for exactly this reason: it reports how far each planted
+sole sits off the deck surface, and the tests assert it is under a millimetre. Every alignment bug
+above showed up there as a fixed offset.
+
+### Park — `scripts/park/ParkBuilder.gd`### Park — `scripts/park/ParkBuilder.gd`
 
 The park is generated from code: flat ground, two facing quarter pipes with grindable coping, a
 bank, a funbox with ledges and kickers, a flat rail and a down-rail. Keeping it procedural means no
@@ -138,10 +180,27 @@ while colliding with its underside.
 
 ### Camera — `scripts/camera/FollowCamera.gd`
 
-Follows position closely but eases *yaw* toward the direction of travel, so spins and quick carves
-read as the skater rotating rather than the world whipping around. Height, distance and FOV open up
-with speed and in the air, and a ray from the skater pulls the camera in rather than letting a ramp
-come between them.
+Follows position closely but eases *yaw* toward the board's **heading**. It used to chase the
+velocity vector, which disagrees with heading during a carve or a powerslide, so the camera swung
+against the turn the player had just asked for. Heading is what the stick controls, so following it
+means view and input always agree.
+
+The camera also publishes its yaw to `Controls`, which is what makes camera-space stick input
+possible. The loop converges rather than oscillating: the stick asks the heading to turn toward the
+view, the view eases toward the heading. Height, distance and FOV open up with speed and in the air,
+and a ray from the skater pulls the camera in rather than letting a ramp come between them.
+
+### Touch controls — `scripts/ui/TouchHUD.gd`
+
+Two "touch anywhere" zones rather than fixed widgets, so you never have to find a control. The one
+non-obvious fix: Godot's `emulate_mouse_from_touch` / `emulate_touch_from_mouse` are **off** in the
+project settings. The emulation mirrors only the first finger, so holding the pop pad with one thumb
+stopped the other thumb's stick from tracking. Both event types are handled explicitly instead, and
+the HUD re-centres everything on focus loss so a finger lifting outside the window cannot leave the
+stick stuck on.
+
+The joystick is covered by tests that feed synthetic `InputEventScreenTouch`/`Drag` through the HUD,
+including two simultaneous thumbs — an input-plumbing bug is not something physics tests can find.
 
 ## Layout
 
@@ -171,9 +230,14 @@ tools/                 fbx.py, fbx2glb.py -- the FBX -> glTF conversion
 
 This is a prototype, and these are the honest edges:
 
-- No leg IK, so the feet straddle the deck rather than locking to it, and they do not track the
-  board through a flip.
+- The board is one rigid mesh, so the wheels do not spin and the deck does not flex.
 - Grind balance is automatic — there is no balance meter to fight.
-- Tricks are ollie, kickflip and 360 shuvit only; there are no grabs, manuals or reverts.
-- The bail is an animation and a respawn, not a ragdoll.
+- Tricks are ollie, kickflip and 360 shuvit only; no grabs, manuals or reverts.
+- A bail plays a tumble and respawns; the board stays with the skater rather than skidding away, and
+  there is no ragdoll.
+- The feet do not track the board through a flip — the character keeps its stance while the deck
+  spins underneath.
+- Regular/goofy is fixed by the sign of `stance_yaw` in `SkateLeanModifier`, and `front_foot` has to
+  agree with it (the hip twist swings one hip toward the nose; putting the other foot there makes
+  the legs cross the board).
 - No audio.

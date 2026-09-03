@@ -3,9 +3,19 @@ extends Node3D
 ## Third-person chase camera.
 ##
 ## It follows the skater's *position* closely but its *yaw* only eases toward the
-## direction of travel, so spins and quick carves read as the skater rotating
-## rather than the world whipping around. Height, distance and FOV all open up
-## with speed and in the air to keep the landing in frame.
+## board's heading, so spins and quick carves read as the skater rotating rather
+## than the world whipping around. Height, distance and FOV all open up with
+## speed and in the air to keep the landing in frame.
+##
+## Yaw tracks *heading* rather than the velocity vector. Velocity and heading
+## disagree during a carve or a powerslide, and chasing velocity made the camera
+## swing against the turn the player had just asked for. Heading is what the
+## stick controls, so following it means the view and the input always agree.
+##
+## The camera also publishes its yaw to `Controls`, which is what lets stick
+## input be read in camera space. That loop is stable rather than oscillating:
+## the stick asks the heading to turn toward the view, the view eases toward the
+## heading, and the two converge.
 
 @export var target_path: NodePath
 @export_group("Framing")
@@ -15,8 +25,8 @@ extends Node3D
 @export var look_height := 1.1
 @export_group("Response")
 @export var position_smooth := 9.0
-@export var yaw_smooth := 4.5
-@export var air_yaw_smooth := 1.6
+@export var yaw_smooth := 3.2
+@export var air_yaw_smooth := 1.5
 @export var distance_smooth := 3.0
 @export_group("Feel")
 @export var base_fov := 68.0
@@ -40,6 +50,7 @@ func _ready() -> void:
 	if _skater:
 		_follow_pos = _skater.global_position
 		_yaw = _skater.heading
+	Controls.camera_yaw = _yaw
 	top_level = true
 
 func _physics_process(delta: float) -> void:
@@ -49,15 +60,7 @@ func _physics_process(delta: float) -> void:
 	_follow_pos = _follow_pos.lerp(_skater.global_position,
 		clampf(delta * position_smooth, 0.0, 1.0))
 
-	# Chase the direction of travel once actually moving; below that keep the
-	# last yaw so the camera doesn't spin when the skater is standing still.
-	var horiz := Vector3(_skater.velocity.x, 0.0, _skater.velocity.z)
-	var want_yaw := _yaw
-	if horiz.length() > 1.2:
-		want_yaw = atan2(-horiz.x, -horiz.z)
-	elif _skater.state == SkaterController.State.ROLL:
-		want_yaw = _skater.heading
-
+	var want_yaw := _skater.heading
 	var yaw_rate := air_yaw_smooth if _skater.state == SkaterController.State.AIR else yaw_smooth
 	_yaw = _lerp_angle(_yaw, want_yaw, clampf(delta * yaw_rate, 0.0, 1.0))
 
@@ -74,6 +77,10 @@ func _physics_process(delta: float) -> void:
 	var target_fov := base_fov + speed_fov * clampf(_skater.speed / fov_speed_ref, 0.0, 1.0)
 	_fov = lerpf(_fov, target_fov, clampf(delta * 4.0, 0.0, 1.0))
 	_camera.fov = _fov
+
+	# Stick input is resolved against this, so it has to be the yaw actually in
+	# use this tick, not the target.
+	Controls.camera_yaw = _yaw
 
 ## Pulls the camera in if a ramp or wall would come between it and the skater.
 func _avoid_geometry(pivot: Vector3, wanted: Vector3) -> Vector3:

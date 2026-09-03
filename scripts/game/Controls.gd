@@ -1,20 +1,31 @@
 extends Node
-## Autoload that merges keyboard/gamepad input with the on-screen Android touch
-## controls into one struct the skater reads. Anything that wants to drive the
-## skater (touch HUD, a replay, a tutorial) writes to the `touch_*` fields.
+## Autoload that merges the on-screen touch stick with keyboard input into one
+## analog control state, and resolves it into a world direction.
+##
+## Everything that steers the skater goes through here, so the touch HUD, the
+## keyboard and the tests all drive exactly the same code path.
+##
+## Stick convention: `move.x` is right, `move.y` is away from the camera. The
+## stick is resolved in *camera* space -- push the stick where you want to go on
+## screen and the skater carves toward it -- which is only coherent because the
+## camera publishes its own yaw here every frame.
+
+## Stick travel below this is treated as centred.
+const DEADZONE := 0.16
 
 # --- written by the touch HUD -------------------------------------------------
-var touch_steer := 0.0        # -1 (left) .. 1 (right)
-var touch_push := false       # push pad held
-var touch_brake := false
-var touch_ollie := false      # ollie/crouch pad held
-var touch_trick := ""         # one-shot trick request, consumed by the skater
+var touch_move := Vector2.ZERO
+var touch_ollie := false
+var touch_trick := ""
 var touch_respawn := false
 
+# --- written by the follow camera --------------------------------------------
+## World yaw of the camera, so stick input can be resolved relative to the view.
+var camera_yaw := 0.0
+
 # --- resolved state read by the skater ---------------------------------------
-var steer := 0.0
-var push := false
-var brake := false
+var move := Vector2.ZERO        ## merged stick, already dead-zoned, |move| <= 1
+var world_move := Vector3.ZERO  ## same thing as a direction on the ground plane
 var ollie_held := false
 var ollie_just_pressed := false
 var ollie_just_released := false
@@ -27,12 +38,18 @@ var _prev_ollie := false
 ## skater reads them on -- polling these from _process drops or repeats inputs
 ## whenever the render and physics rates disagree.
 func _physics_process(_delta: float) -> void:
-	var key_steer := Input.get_axis(&"steer_left", &"steer_right")
-	steer = clampf(key_steer + touch_steer, -1.0, 1.0)
+	var keys := Vector2(
+		Input.get_axis(&"steer_left", &"steer_right"),
+		Input.get_axis(&"brake", &"push"))
+	move = (keys + touch_move).limit_length(1.0)
+	if move.length() < DEADZONE:
+		move = Vector2.ZERO
+	else:
+		# Rescale so the stick still reaches full deflection past the deadzone.
+		move = move.normalized() * inverse_lerp(DEADZONE, 1.0, minf(move.length(), 1.0))
 
-	push = Input.is_action_pressed(&"push") or touch_push
-
-	brake = Input.is_action_pressed(&"brake") or touch_brake
+	var view := Basis(Vector3.UP, camera_yaw)
+	world_move = view * Vector3(move.x, 0.0, -move.y)
 
 	ollie_held = Input.is_action_pressed(&"ollie") or touch_ollie
 	ollie_just_pressed = ollie_held and not _prev_ollie
@@ -57,4 +74,13 @@ func consume_trick() -> String:
 	return t
 
 func clear_trick() -> void:
+	_trick_request = ""
+
+func clear_all() -> void:
+	touch_move = Vector2.ZERO
+	touch_ollie = false
+	touch_trick = ""
+	touch_respawn = false
+	move = Vector2.ZERO
+	world_move = Vector3.ZERO
 	_trick_request = ""

@@ -35,15 +35,21 @@ enum State { ROLL, AIR, GRIND, BAIL }
 
 # --- steering ----------------------------------------------------------------
 @export_group("Steering")
-@export var max_turn_rate := 2.6          # rad/s at the carving sweet spot
-@export var pivot_turn_rate := 1.9        # rad/s kick-turn when nearly stopped
-@export var carve_speed_ref := 5.0        # speed where steering is most responsive
-@export var high_speed_turn_scale := 0.42 # steering authority retained at max_speed
+@export var max_turn_rate := 2.4          # rad/s at the carving sweet spot
+@export var pivot_turn_rate := 2.2        # rad/s kick-turn when nearly stopped
+@export var carve_speed_ref := 3.0        # steering is fully available above this
+@export var high_speed_turn_scale := 0.55 # steering authority retained at max_speed
+## Stick angle off the nose that asks for full lock. Smaller = twitchier.
+@export var full_lock_angle := 50.0
+## How fast the trucks take up a steering input. This is most of the board's
+## sense of weight: instant steering feels like sliding a cursor around.
+@export var steer_response := 4.5
+@export var steer_return := 6.5
 ## How hard the wheels resist sliding sideways. Higher = railed, lower = loose.
-@export var grip := 14.0
-@export var powerslide_grip := 2.2
+@export var grip := 16.0
+@export var powerslide_grip := 2.4
 ## Speed bled off by carving hard, as a fraction of speed per second.
-@export var carve_drag := 0.30
+@export var carve_drag := 0.22
 
 # --- air / ollie -------------------------------------------------------------
 @export_group("Air")
@@ -62,6 +68,15 @@ enum State { ROLL, AIR, GRIND, BAIL }
 ## How far off the surface plane the velocity may point and still be treated as
 ## riding along it rather than slamming into it. Roughly sin(angle).
 @export_range(0.05, 1.0) var redirect_limit := 0.5
+
+@export_group("Suspension")
+## Trucks compress on landing and spring back. Purely visual, but it is what
+## gives a drop-in weight -- the whole body dips, because the character rides
+## the same pivot.
+@export var compress_per_impact := 0.13
+@export var compress_max := 0.10
+@export var compress_stiffness := 190.0
+@export var compress_damping := 17.0
 
 # --- probing -----------------------------------------------------------------
 @export_group("Ground probing")
@@ -96,7 +111,16 @@ var push_anim_timer := 0.0
 
 const PROBE_HEIGHT := 0.35
 
+## -1..1, the smoothed steering the trucks are actually holding.
+var steer := 0.0
+## -1..1 from the stick: positive pushes, negative brakes.
+var throttle := 0.0
+## Advances 0..1 through each push stroke, for the animation to follow.
+var push_phase := 0.0
+var compression := 0.0
+
 var _probes: Array[RayCast3D] = []
+var _compress_vel := 0.0
 var _ground_gap := INF
 var _ground_lockout := 0.0
 var _time_since_grounded := 0.0
@@ -141,6 +165,8 @@ func _physics_process(delta: float) -> void:
 	_push_cooldown = maxf(0.0, _push_cooldown - delta)
 	push_anim_timer = maxf(0.0, push_anim_timer - delta)
 	_ground_lockout = maxf(0.0, _ground_lockout - delta)
+	push_phase = 0.0 if push_anim_timer <= 0.0 else 1.0 - (push_anim_timer / push_interval)
+	_update_suspension(delta)
 
 	if Controls.respawn_pressed:
 		respawn()
@@ -231,23 +257,25 @@ func _process_roll(delta: float) -> void:
 	var v_lat := velocity.dot(right)
 	var spd := absf(v_fwd)
 
+	_resolve_input(fwd, delta)
+
 	# --- steering ------------------------------------------------------------
-	var steer := Controls.steer
 	var turn := _turn_rate(spd) * steer
 	if v_fwd < -0.5:
 		turn = -turn  # rolling backwards inverts the steering, as it should
 	heading = wrapf(heading + turn * delta, -PI, PI)
 
 	# --- push / brake --------------------------------------------------------
-	if Controls.push and _push_cooldown <= 0.0 and spd < push_top_speed:
-		v_fwd += push_impulse * (1.0 - clampf(spd / push_top_speed, 0.0, 1.0) * 0.55)
+	if throttle > 0.05 and _push_cooldown <= 0.0 and spd < push_top_speed:
+		v_fwd += push_impulse * throttle * (1.0 - clampf(spd / push_top_speed, 0.0, 1.0) * 0.55)
 		_push_cooldown = push_interval
-		push_anim_timer = 0.45
+		push_anim_timer = push_interval
+		_kick_suspension(1.2)
 		pushed.emit()
 
-	powersliding = Controls.brake and absf(steer) > 0.4 and spd > 3.0
-	if Controls.brake:
-		v_fwd = move_toward(v_fwd, 0.0, brake_decel * delta)
+	powersliding = throttle < -0.2 and absf(steer) > 0.45 and spd > 3.0
+	if throttle < -0.05:
+		v_fwd = move_toward(v_fwd, 0.0, brake_decel * -throttle * delta)
 
 	# --- resistance ----------------------------------------------------------
 	v_fwd = move_toward(v_fwd, 0.0, rolling_resistance * delta)
@@ -307,6 +335,37 @@ func _project_onto_surface(n: Vector3) -> void:
 	else:
 		velocity = tangential
 
+## Turns the camera-relative stick into a steering amount and a throttle.
+##
+## The stick names a direction on screen, not a rudder position: the angle
+## between the board's nose and that direction is what steers, so pointing the
+## stick where you want to go carves you there and keeps working no matter which
+## way the camera has swung round. Pulling back past side-on reads as braking
+## rather than as a demand to spin on the spot.
+func _resolve_input(fwd: Vector3, delta: float) -> void:
+	var want := Controls.world_move
+	var target_steer := 0.0
+	var target_throttle := 0.0
+
+	if want.length() > 0.01:
+		var mag := clampf(want.length(), 0.0, 1.0)
+		var desired := want.normalized()
+		# Signed angle from the nose to the stick direction, about world up.
+		var angle := atan2(fwd.cross(desired).dot(Vector3.UP), fwd.dot(desired))
+		target_steer = clampf(angle / deg_to_rad(full_lock_angle), -1.0, 1.0) * mag
+		var alignment := cos(angle)
+		if alignment > -0.3:
+			target_throttle = mag * clampf(alignment, 0.0, 1.0)
+		else:
+			# Stick held back against the direction of travel: that is the brake.
+			target_throttle = -mag
+
+	# Easing in is slower than centring, so the board loads up into a carve but
+	# straightens promptly when you let go.
+	var rate := steer_response if absf(target_steer) > absf(steer) else steer_return
+	steer = move_toward(steer, target_steer, rate * delta)
+	throttle = move_toward(throttle, target_throttle, 8.0 * delta)
+
 func _turn_rate(spd: float) -> float:
 	if spd < 0.6:
 		return pivot_turn_rate
@@ -331,6 +390,8 @@ func _do_ollie() -> void:
 func _enter_air(from_pop: bool) -> void:
 	if state == State.AIR:
 		return
+	throttle = 0.0
+	push_anim_timer = 0.0
 	state = State.AIR
 	if not from_pop:
 		_time_since_grounded = 0.0
@@ -348,7 +409,8 @@ func _process_air(delta: float) -> void:
 	horiz -= horiz * air_drag * delta
 	velocity = Vector3(horiz.x, velocity.y, horiz.z)
 
-	heading = wrapf(heading + Controls.steer * air_turn_rate * delta, -PI, PI)
+	_resolve_input(Basis(Vector3.UP, heading) * Vector3.FORWARD, delta)
+	heading = wrapf(heading + steer * air_turn_rate * delta, -PI, PI)
 	crouch = maxf(0.0, crouch - delta * 4.0)
 
 	var queued := Controls.consume_trick()
@@ -386,6 +448,7 @@ func _try_land() -> void:
 	velocity *= (1.0 - steep * 0.35)
 
 	trick_system.finish_landing()
+	_kick_suspension(impact)
 	_snap_to_ground()
 	state = State.ROLL
 	state_changed.emit(state)
@@ -427,6 +490,13 @@ func respawn() -> void:
 	heading = xform.basis.get_euler().y
 	ground_normal = Vector3.UP
 	surface_up = Vector3.UP
+	steer = 0.0
+	throttle = 0.0
+	push_anim_timer = 0.0
+	push_phase = 0.0
+	compression = 0.0
+	_compress_vel = 0.0
+	_push_cooldown = 0.0
 	trick_system.abort()
 	grind_system.exit_grind()
 	state = State.ROLL
@@ -447,6 +517,16 @@ func _track_checkpoint(delta: float) -> void:
 		_checkpoint_timer = 0.0
 		var xform := Transform3D(Basis(Vector3.UP, heading), global_position + Vector3.UP * 0.1)
 		Game.update_checkpoint(xform)
+
+## Damped spring for the trucks. Landing kicks it, and it settles back to ride
+## height; the board pivot carries the character, so the whole body dips with it.
+func _update_suspension(delta: float) -> void:
+	var accel := -compression * compress_stiffness - _compress_vel * compress_damping
+	_compress_vel += accel * delta
+	compression = clampf(compression + _compress_vel * delta, -compress_max, compress_max)
+
+func _kick_suspension(impact: float) -> void:
+	_compress_vel -= impact * compress_per_impact
 
 ## Falling out of the world resets immediately; skating off the edge of the park
 ## is treated as a bail so it reads as a mistake rather than a teleport.
@@ -481,12 +561,12 @@ func _update_visual_orientation(delta: float) -> void:
 
 	var target := Basis(x_axis, y_axis, z_axis)
 	# Lean into the carve; visual only, but it sells the grip model.
-	var lean := -Controls.steer * clampf(speed / 10.0, 0.0, 1.0) * 0.45
+	var lean := -steer * clampf(speed / 10.0, 0.0, 1.0) * 0.5
 	target = target * Basis(Vector3.FORWARD, lean)
 
 	board_pivot.global_transform = Transform3D(
 		board_pivot.global_transform.basis.slerp(target, clampf(delta * 16.0, 0.0, 1.0)),
-		global_position + Vector3.UP * ride_height)
+		global_position + Vector3.UP * (ride_height + compression))
 
 func surface_speed() -> float:
 	return _last_ground_speed

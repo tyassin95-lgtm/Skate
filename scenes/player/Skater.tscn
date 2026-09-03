@@ -31,8 +31,12 @@ shape = SubResource("SphereShape3D_body")
 [node name="Board" parent="BoardPivot/BoardModel" instance=ExtResource("5_board")]
 transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 0, 0, 0)
 
+; The rig faces +Z but Godot's forward is -Z (a Blender export artifact), so the
+; character is turned 180 degrees to line its root up with the board's nose. The
+; sideways skate stance is a hip twist inside SkateLeanModifier, not a yaw here:
+; with a yaw here, any forward-moving clip played sideways across the board.
 [node name="CharacterPivot" type="Node3D" parent="BoardPivot"]
-transform = Transform3D(0.258819, 0, 0.965926, 0, 1, 0, -0.965926, 0, 0.258819, 0, 0, 0)
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
 
 [node name="Character" parent="BoardPivot/CharacterPivot" instance=ExtResource("6_character")]
 
