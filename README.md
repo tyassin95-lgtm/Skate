@@ -70,6 +70,12 @@ essentially every current Android device.
 `.github/workflows/android.yml` does all of the above on a runner and uploads the APK as a build
 artifact, so a green CI run is proof the project still builds for Android.
 
+This has been run end to end: the debug export produces a ~74 MB APK
+(`org.godotengine.skate`, minSdk 21) that `apksigner verify` accepts under the v1, v2 and v3
+schemes, carrying `arm64-v8a`, `armeabi-v7a` and `x86_64` native libraries. Most of that size is
+Godot's debug template across three architectures; a release export with the emulator-only
+`x86_64` slice turned off is considerably smaller.
+
 ## How it works
 
 ### Skating physics — `scripts/skater/SkaterController.gd`
