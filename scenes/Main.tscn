@@ -1,0 +1,60 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/Main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/park/Skatepark.tscn" id="2_park"]
+[ext_resource type="PackedScene" path="res://scenes/player/Skater.tscn" id="3_skater"]
+[ext_resource type="PackedScene" path="res://scenes/ui/TouchHUD.tscn" id="4_hud"]
+[ext_resource type="Script" path="res://scripts/camera/FollowCamera.gd" id="5_camera"]
+
+[sub_resource type="ProceduralSkyMaterial" id="Sky_material"]
+sky_top_color = Color(0.24, 0.46, 0.78, 1)
+sky_horizon_color = Color(0.72, 0.79, 0.87, 1)
+ground_bottom_color = Color(0.28, 0.29, 0.31, 1)
+ground_horizon_color = Color(0.55, 0.56, 0.58, 1)
+sun_angle_max = 22.0
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("Sky_material")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+; A flat ambient colour rather than sky ambient: sky ambient in the compatibility
+; renderer floods every surface with the sky's blue and washes the park out.
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.64, 0.72, 1)
+ambient_light_energy = 0.32
+tonemap_mode = 2
+tonemap_exposure = 0.95
+fog_enabled = true
+fog_light_color = Color(0.7, 0.76, 0.84, 1)
+fog_density = 0.0025
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 12, 0)
+light_color = Color(1, 0.97, 0.9, 1)
+light_energy = 1.0
+shadow_enabled = true
+directional_shadow_max_distance = 60.0
+
+[node name="Skatepark" parent="." instance=ExtResource("2_park")]
+
+[node name="Skater" parent="." instance=ExtResource("3_skater")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 8)
+
+[node name="CameraRig" type="Node3D" parent="."]
+script = ExtResource("5_camera")
+target_path = NodePath("../Skater")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+fov = 68.0
+near = 0.1
+far = 220.0
+
+[node name="HUD" parent="." instance=ExtResource("4_hud")]

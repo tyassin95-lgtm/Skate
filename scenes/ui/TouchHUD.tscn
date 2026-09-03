@@ -1,0 +1,102 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/TouchHUD.gd" id="1_hud"]
+
+[node name="TouchHUD" type="CanvasLayer"]
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+[node name="Readout" type="VBoxContainer" parent="Root"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 280.0
+offset_bottom = 96.0
+mouse_filter = 2
+
+[node name="Speed" type="Label" parent="Root/Readout"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 0.9)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.6)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 34
+text = "0.0 m/s"
+
+[node name="Score" type="Label" parent="Root/Readout"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.45, 0.95)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.6)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 26
+text = "0 pts"
+
+[node name="TrickPopup" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -320.0
+offset_top = 110.0
+offset_right = 320.0
+offset_bottom = 160.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.7)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 40
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -40.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 0.5)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.5)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 18
+text = "Left half: steer (drag down to brake)   ·   Right half: hold to load, flick left = kickflip, right = 360 shuvit"
+horizontal_alignment = 1
+
+[node name="PushButton" type="Button" parent="Root"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -220.0
+offset_top = -260.0
+offset_right = -40.0
+offset_bottom = -180.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 30
+text = "PUSH"
+
+[node name="ResetButton" type="Button" parent="Root"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -140.0
+offset_top = 20.0
+offset_right = -24.0
+offset_bottom = 72.0
+grow_horizontal = 0
+theme_override_font_sizes/font_size = 22
+text = "RESET"

@@ -1,0 +1,46 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/skater/SkaterController.gd" id="1_controller"]
+[ext_resource type="Script" path="res://scripts/skater/TrickSystem.gd" id="2_tricks"]
+[ext_resource type="Script" path="res://scripts/skater/GrindSystem.gd" id="3_grind"]
+[ext_resource type="Script" path="res://scripts/skater/SkaterAnimator.gd" id="4_animator"]
+[ext_resource type="PackedScene" path="res://assets/board/skateboard.glb" id="5_board"]
+[ext_resource type="PackedScene" path="res://assets/character/UAL1_Standard.glb" id="6_character"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_body"]
+radius = 0.3
+
+[node name="Skater" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("1_controller")
+
+; A sphere sitting at wheel height, not an upright capsule: a standing capsule
+; wedges into steep quarter-pipe transitions because its top ends up inside the
+; ramp. Collision only ever needs to stand in for the board and its wheels.
+[node name="Collider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+shape = SubResource("SphereShape3D_body")
+
+[node name="Probes" type="Node3D" parent="."]
+
+[node name="BoardPivot" type="Node3D" parent="."]
+
+[node name="BoardModel" type="Node3D" parent="BoardPivot"]
+
+[node name="Board" parent="BoardPivot/BoardModel" instance=ExtResource("5_board")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 0, 0, 0)
+
+[node name="CharacterPivot" type="Node3D" parent="BoardPivot"]
+transform = Transform3D(0.258819, 0, 0.965926, 0, 1, 0, -0.965926, 0, 0.258819, 0, 0, 0)
+
+[node name="Character" parent="BoardPivot/CharacterPivot" instance=ExtResource("6_character")]
+
+[node name="TrickSystem" type="Node" parent="."]
+script = ExtResource("2_tricks")
+
+[node name="GrindSystem" type="Node" parent="."]
+script = ExtResource("3_grind")
+
+[node name="Animator" type="Node" parent="."]
+script = ExtResource("4_animator")

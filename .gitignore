@@ -1,0 +1,16 @@
+# Godot 4 import cache and editor state
+.godot/
+*.translation
+
+# Exported builds
+build/
+export/
+*.apk
+*.aab
+*.tmp
+
+# Android export template / keystore material -- never commit these
+android/build/
+*.keystore
+*.jks
+export_credentials.cfg
